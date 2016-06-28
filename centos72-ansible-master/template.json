@@ -30,30 +30,18 @@
             "ssh_username": "{{user `ssh_username`}}",
             "ssh_password": "{{user `ssh_password`}}",
             "ssh_port": 22,
-            "ssh_wait_timeout": "10000s",
+            "ssh_wait_timeout": "1000s",
             "guest_additions_mode": "disable",
             "shutdown_command": "sudo -S shutdown -P now",
             "output_directory": "output-{{user `template`}}",
             "format": "ova"
         }
     ],
-    "provisioners": [
-        {
-            "type": "file",
-            "source": "10-growpart.cfg",
-            "destination": "/tmp/10-growpart.cfg"
-        },
+   "provisioners": [
         {
             "type": "shell",
             "execute_command": "sudo -S sh '{{.Path}}'",
             "inline": [
-                "yum -y install cloud-init cloud-utils cloud-utils-growpart",
-                "mv /tmp/10-growpart.cfg /etc/cloud/cloud.cfg.d/10-growpart.cfg",
-                "chown root:root /etc/cloud/cloud.cfg.d/10-growpart.cfg",
-                "systemctl enable cloud-config.service",
-                "systemctl enable cloud-final.service",
-                "systemctl enable cloud-init-local.service",
-                "systemctl enable cloud-init.service",
                 "echo \"{{user `ssh_username`}}:$(openssl rand -base64 32)\" | chpasswd",
                 "shred -u /etc/ssh/*_key /etc/ssh/*_key.pub",
                 "shred -u /root/.*history  /home/centos/.*history",
