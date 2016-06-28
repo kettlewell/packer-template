@@ -1,8 +1,9 @@
 {
     "min_packer_version": "0.8.6",
-    "description": "Bare CentOS 7 prepped for AMI import",
+    "description": "Ansible Master CentOS 7 prepped for AMI import",
     "variables": {
         "profile": "ansible-master",
+        "template": "ansible-master",
         "disk_size": "8192",
         "memory": "2048",
         "cpus": "2",
@@ -12,7 +13,7 @@
     "builders": [
         {
             "type": "virtualbox-iso",
-            "vm_name": "centos7-ec2-{{user `profile`}}",
+            "vm_name": "{{user `template`}}",
             "headless": true,
             "guest_os_type": "RedHat_64",
             "disk_size": "{{user `disk_size`}}",
@@ -29,10 +30,10 @@
             "ssh_username": "{{user `ssh_username`}}",
             "ssh_password": "{{user `ssh_password`}}",
             "ssh_port": 22,
-            "ssh_wait_timeout": "1000s",
+            "ssh_wait_timeout": "10000s",
             "guest_additions_mode": "disable",
             "shutdown_command": "sudo -S shutdown -P now",
-            "output_directory": "output-{{user `profile`}}",
+            "output_directory": "output-{{user `template`}}",
             "format": "ova"
         }
     ],

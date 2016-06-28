@@ -28,7 +28,7 @@ usage(){
     echo "        -d                   Will show debug info."
     echo "        -n                   Will disable headless build"
     echo "        -h                   Will show this."
-    echo "        -r                   Will remove qcow on finish."
+    echo "        -r                   Will remove image on finish."
     echo "        -u BUCKET            Will upload the template to the specified S3 bucket when build successfull."
     echo ""
     exit 1
@@ -40,7 +40,9 @@ if [ $# == 0 ]; then
 fi
 
 # Set all options to false.
-DISK_SIZE=0
+DISK_SIZE=4096
+MEMORY=2048
+CPUS=2
 REMOVE_CACHE=0
 UPLOAD_S3=0
 S3_BUCKET=0
@@ -50,9 +52,11 @@ BUILD_ALL=0
 DEBUG=0
 PACKER_DBG=''
 HEADLESS=1
+IMPORT_EC2=0
+
 
 # Loop over all arguments.
-while getopts ":s:u:t:acdrnh" OPT; do
+while getopts ":s:u:t:e:acdrnh" OPT; do
     case $OPT in
     c)
         REMOVE_CACHE=1
@@ -61,6 +65,9 @@ while getopts ":s:u:t:acdrnh" OPT; do
         DEBUG=1
         PACKER_DBG='-debug'
         ;;
+    e)
+        IMPORT_EC2=1
+        ;;
     n)
         HEADLESS=0
         ;;
@@ -68,7 +75,7 @@ while getopts ":s:u:t:acdrnh" OPT; do
         usage
         ;;
     r)
-        REMOVE_QCOW=1
+        REMOVE_IMAGE=1
         ;;
     s)
         DISK_SIZE=$OPTARG
@@ -94,22 +101,28 @@ if [ $DISK_SIZE -eq 0 ]; then
     usage
 fi
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+TEMPLATES_DIR="${SCRIPT_DIR}/templates"
+
 # DEBUG
 if [ $DEBUG -eq 1 ]; then
     echo ""
     echo "DEBUG: DISK_SIZE: $DISK_SIZE"
     echo "DEBUG: REMOVE_CACHE: $REMOVE_CACHE"
-    echo "DEBUG: REMOVE_QCOW: $REMOVE_QCOW"
     echo "DEBUG: HEADLESS: $HEADLESS"
     echo "DEBUG: UPLOAD_S3: $UPLOAD_S3"
     echo "DEBUG: S3_BUCKET: $S3_BUCKET"
     echo "DEBUG: BUILD_TEMPLATE: $BUILD_TEMPLATE"
     echo "DEBUG: BUILD_TEMPLATE_NAME: $BUILD_TEMPLATE_NAME"
+    echo "DEBUG: SCRIPT_DIR: ${SCRIPT_DIR}"
+    echo "DEBUG: TEMPLATES_DIR: ${TEMPLATES_DIR}"
     echo ""
 fi
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-TEMPLATES_DIR="${SCRIPT_DIR}/templates"
+
+# Check for Packer executable
+# - Note that in CentOS, the name conflicts with a packer executable
+#   would need to check based on OS as well to be complete.
 
 if hash packer.io 2>/dev/null; then
     PACKER=$(which packer.io)
@@ -122,6 +135,19 @@ fi
 
 if [ -z "$PACKER" ]; then
     echo "Error: Packer could not be found in PATH!"
+    exit 1
+fi
+
+# Check for AWS cli executable
+if hash packer.io 2>/dev/null; then
+    AWSCLI=$(which aws)
+else
+    echo "ERROR:  aws Not Found in PATH"
+    exit 1
+fi
+
+if [ -z "$AWSCLI" ]; then
+    echo "Error: aws could not be found in PATH!"
     exit 1
 fi
 
@@ -152,9 +178,9 @@ build_template(){
     ${PACKER} build \
         ${PACKER_DBG} \
         -var "disk_size=$DISK_SIZE" \
-        -var "ncpu=$GOMAXPROCS" \
-        -var "template_name=$TEMPLATE_NAME" \
-        -var "headless=$HEADLESS" \
+        -var "cpus=$CPUS" \
+        -var "template=$TEMPLATE_NAME" \
+        -var "memory=$MEMORY" \
         template.json
 
     if [ ! $? -eq 0 ]; then
@@ -163,23 +189,26 @@ build_template(){
     fi
 
     if [ $UPLOAD_S3 -eq 1 ]; then
-        echo "Info: Uploading template $TEMPLATE_NAME.qcow2 to S3 bucket s3://$S3_BUCKET."
-        aws s3 cp output-ansible-master/centos7-ec2-ansible-master.ova  s3://${S3_BUCKET}/centos7-ec2-ext4.ova
-        # s3cmd put $TEMPLATE_NAME.qcow2 s3://$S3_BUCKET -P
+        echo "Info: Uploading template $TEMPLATE_NAME.ova to S3 bucket s3://$S3_BUCKET."
+        ${AWSCLI} s3 cp output-${TEMPLATE_NAME}/${TEMPLATE_NAME}.ova  s3://${S3_BUCKET}/${TEMPLATE_NAME}.ova
     fi
     
-
-    ## Uploading to S3
-    # aws s3 cp output-ext4/centos7-ec2-ext4.ova s3://my-ami-bucket/centos7-ec2-ext4.ova
-
-    ## Importing to EC2
-    #  aws ec2 import-image --cli-input-json '{  "Description": "CentOS 7 EXT4", "DiskContainers": [ { "Description": "CentOS 7 EXT4", "UserBucket": { "S3Bucket": "my-ami-bucket", "S3Key" : "centos7-ec2-ext4.ova" } } ]}'
-
-
-    if [ -d "packer_output" ]; then
-        echo "Info: Removing temporary folder packer_output"
-        rm -fr packer_output
+    if [ ! $? -eq 0 ]; then
+        echo "Error: S3 Upload Failed. Stopping."
+        RETURN_CODE=1
+        exit ${RETURN_CODE}
     fi
+
+    if [ $IMPORT_EC2 -eq 1 ]; then
+        echo "Info: Importing Template into AWS EC2"
+        ## Importing to EC2
+        # ${AWSCLI} ec2 import-image --cli-input-json '{  "Description": "CentOS 7 EXT4", "DiskContainers": [ { "Description": "CentOS 7 EXT4", "UserBucket": { "S3Bucket": "my-ami-bucket", "S3Key" : "centos7-ec2-ext4.ova" } } ]}'
+    fi
+
+#    if [ -d "packer_output" ]; then
+#        echo "Info: Removing temporary folder packer_output"
+#        rm -fr packer_output
+#    fi
 
     if [ $REMOVE_CACHE -eq 1 ]; then
         if [ -d "packer_cache" ]; then
